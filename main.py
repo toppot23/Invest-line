@@ -49,7 +49,7 @@ prompt = f"""
 try:
     # วิธีสั่งให้ AI जनरेट ข้อความแบบใหม่ (ใช้โมเดล gemini-2.5-flash ซึ่งเป็นตัวล่าสุด)
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.5-flash',
         contents=prompt,
     )
     summary_text = response.text
