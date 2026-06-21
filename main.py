@@ -22,64 +22,65 @@ def fetch_ticker_price(symbol):
     except Exception:
         return None
 
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย (ระบบ Dual-Source ปตท. + บางจาก)
+# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย (แก้ปัญหาการโดนบล็อก + ดึง 2 แหล่ง)
 def fetch_thai_oil_prices():
     gasohol95 = None
     diesel = None
     update_date = ""
     
-    # แหล่งที่ 1: API ปตท. (OR)
+    # พรางตัวเป็น Web Browser เพื่อไม่ให้เซิร์ฟเวอร์บล็อก GitHub Actions
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    # แผน A: ดึงจาก API ราคาน้ำมันไทย (JSON) ที่เสถียรและแม่นยำ
     try:
-        url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=thai"
-        response = requests.get(url, timeout=10)
+        res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            prices = data.get('response', {}).get('stations', {}).get('ptt', {})
+            update_date = data.get('response', {}).get('date', '')
+            
+            if 'gasohol_95' in prices:
+                gasohol95 = str(prices['gasohol_95'].get('price', ''))
+            if 'diesel' in prices:
+                diesel = str(prices['diesel'].get('price', ''))
+                
+            if gasohol95 and diesel:
+                return gasohol95, diesel, update_date
+    except Exception as e:
+        print(f"JSON API Error: {e}")
+
+    # แผน B: ดึงจากระบบ ปตท. (XML) เผื่อแผน A ล่ม
+    try:
+        url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=en"
+        response = requests.get(url, headers=headers, timeout=10)
+        
         if response.status_code == 200:
             root = ET.fromstring(response.content)
-            inner_xml = root.text
-            inner_root = ET.fromstring(inner_xml)
+            inner_root = ET.fromstring(root.text)
             
             for item in inner_root.findall('DataAccess'):
-                prod_text, val_text, date_text = "", "", ""
-                for child in item:
-                    tag_upper = child.tag.upper()
-                    if tag_upper == 'PRODUCT': prod_text = child.text or ""
-                    elif tag_upper == 'PRICE': val_text = child.text or ""
-                    elif tag_upper == 'PRICE_DATE': date_text = child.text or ""
+                prod = item.find('PRODUCT')
+                price = item.find('PRICE')
+                date_val = item.find('PRICE_DATE')
                 
-                if not prod_text or not val_text: 
-                    continue
+                if prod is not None and price is not None and price.text:
+                    p_name = prod.text.lower()
                     
-                p_lower = prod_text.lower()
-                if not update_date and date_text:
-                    update_date = date_text.split(' ')[0]
-                    
-                # ดึงราคาแก๊สโซฮอล์ 95 และดีเซลปกติ
-                if "95" in p_lower and ("แก๊ส" in p_lower or "gas" in p_lower):
-                    if "premium" not in p_lower and "พรีเมียม" not in p_lower:
-                        gasohol95 = val_text
-                elif "ดีเซล" in p_lower or "diesel" in p_lower:
-                    if "premium" not in p_lower and "พรีเมียม" not in p_lower and "super" not in p_lower:
-                        diesel = val_text
+                    if not update_date and date_val is not None:
+                        update_date = date_val.text.split(' ')[0]
+                        
+                    if "gasohol 95" in p_name and "premium" not in p_name and "super" not in p_name:
+                        gasohol95 = price.text
+                    elif "diesel" in p_name and "premium" not in p_name and "super" not in p_name:
+                        diesel = price.text
+                        
+            if gasohol95 or diesel:
+                return gasohol95, diesel, update_date
     except Exception as e:
         print(f"PTT API Error: {e}")
 
-    # แหล่งที่ 2: RSS บางจาก (แก้ไขลิงก์เป็น .co.th เรียบร้อย) จะทำงานเมื่อแหล่งแรกไม่มีข้อมูล
-    if not gasohol95 or not diesel:
-        try:
-            feed_url = "https://www.bangchak.co.th/th/oilprice-rss"
-            feed = feedparser.parse(feed_url)
-            if feed.entries:
-                if not update_date:
-                    update_date = feed.entries[0].get('updated', '').split('T')[0] or feed.entries[0].get('published', '')
-                for entry in feed.entries:
-                    title = entry.title.lower()
-                    if "gasohol 95" in title or "แก๊สโซฮอล์ 95" in title:
-                        gasohol95 = entry.summary
-                    elif "diesel" in title or "ดีเซล" in title:
-                        if "premium" not in title and "พรีเมียม" not in title:
-                            diesel = entry.summary
-        except Exception as e:
-            print(f"Bangchak RSS Error: {e}")
-            
     return gasohol95, diesel, update_date
 
 print("กำลังดึงข้อมูลราคาล่าสุด...")
@@ -88,16 +89,16 @@ oil_wti = fetch_ticker_price("CL=F")
 btc_price = fetch_ticker_price("BTC-USD")  
 th_gas95, th_diesel, th_oil_date = fetch_thai_oil_prices()
 
-# ประกอบข้อมูลราคา
+# ประกอบข้อมูลราคาจัดหน้าแบบคลีนๆ
 price_context = "ราคาตลาดล่าสุด\n"
 price_context += f"• ทองคำโลก: ${gold_price:.2f} / ออนซ์\n" if gold_price else ""
 price_context += f"• น้ำมันดิบโลก (WTI): ${oil_wti:.2f} / บาร์เรล\n" if oil_wti else ""
 price_context += f"• Bitcoin: ${btc_price:,.2f}\n" if btc_price else ""
 
 if th_gas95 or th_diesel:
-    price_context += f"\n[ราคาน้ำมันขายปลีกในไทย (บาท/ลิตร) อัปเดตวันที่: {th_oil_date}]\n"
-    if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท\n"
-    if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท\n"
+    price_context += f"\n[ราคาน้ำมันขายปลีกไทย อัปเดตวันที่: {th_oil_date}]\n"
+    if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
+    if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
 # 3. ดึงข้อมูลข่าวสาร
 rss_feeds = {
@@ -128,7 +129,7 @@ prompt = f"""
 1. 🇺🇸 หุ้นสหรัฐ (ภาพรวม, Sector เด่น, หุ้นที่น่าสนใจ)
 2. 🇨🇳 หุ้นจีนและฮ่องกง (ภาพรวมตลาด, กลุ่มอุตสาหกรรม, หุ้นเด่น)
 3. 🇹🇭 หุ้นไทย (ประเด็นหลักที่กระทบตลาดวันนี้)
-4. 🥇 ทองคำ และ 🛢️ น้ำมัน (บรรทัดแรกให้ใส่ราคาและทิศทางทองคำโลก น้ำมันดิบโลก และราคาน้ำมันขายปลีกในไทย แก๊สโซฮอล์ 95 และดีเซล พร้อมระบุวันที่อัปเดตที่แนบมาให้ชัดเจน จากนั้นสรุปข่าวที่เกี่ยวข้อง)
+4. 🥇 ทองคำ และ 🛢️ น้ำมัน (บรรทัดแรกให้นำข้อมูล ราคาตลาดล่าสุด และ ราคาน้ำมันขายปลีกไทย ที่แนบให้ไปใส่ให้ครบถ้วน จากนั้นสรุปข่าวที่เกี่ยวข้อง)
 5. ₿ คริปโตเคอร์เรนซี (บรรทัดแรกให้สรุปราคา BTC ล่าสุด และสรุปข่าวสารสำคัญ)
 6. 🌍 เศรษฐกิจมหภาค (ดอกเบี้ย ค่าเงิน นโยบายการเงินทั่วโลก)
 
@@ -136,7 +137,7 @@ prompt = f"""
 • หากหัวข้อไหนไม่มีข่าว ให้เขียนบรรทัดเดียวสั้นๆ ว่า "ไม่มีประเด็นสำคัญ"
 • สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
-ข้อมูลราคาสำหรับนำไปใส่ในหมวดหมู่:
+ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
 {price_context}
 
 ข้อมูลข่าวสำหรับวันนี้:
@@ -149,7 +150,7 @@ try:
         contents=prompt,
     )
     summary_text = response.text
-    # บังคับล้างเครื่องหมายเพื่อความสะอาดตาขั้นสุด
+    # บังคับล้างเครื่องหมายขยะ
     summary_text = summary_text.replace('*', '').replace('#', '')
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาด: {e}"
