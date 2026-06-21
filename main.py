@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import feedparser
 import yfinance as yf
@@ -6,15 +7,15 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 from google import genai
 import pytz
-import sys
 
+# ตั้งค่า API Keys จาก GitHub Secrets
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 LINE_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_USER_ID = os.environ.get('LINE_USER_ID')
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ตั้งเวลาไทย
+# ตั้งเวลาไทยสำหรับแสดงในหัวข้อ
 tz_thai = pytz.timezone('Asia/Bangkok')
 now_thai = datetime.now(tz_thai)
 current_time_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
@@ -40,6 +41,7 @@ def fetch_thai_oil_prices():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
+    # แผน A: ดึงจาก API
     try:
         res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
         if res.status_code == 200:
@@ -57,6 +59,7 @@ def fetch_thai_oil_prices():
     except Exception:
         pass
 
+    # แผน B: ดึงจากระบบ ปตท. สำรอง
     try:
         url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=en"
         response = requests.get(url, headers=headers, timeout=10)
@@ -104,7 +107,7 @@ if th_gas95 or th_diesel:
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสาร
+# 3. ดึงข้อมูลข่าวสารจากคลังข่าวหลัก
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -117,7 +120,7 @@ news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:10]: 
+        for entry in feed.entries[:10]: # ดึงแค่ 10 ข่าวต่อหมวดเพื่อไม่ให้ข้อความยาวเกินไป
             news_data += f"- {entry.title}\n"
     except Exception:
         pass
@@ -151,12 +154,14 @@ prompt = f"""
 """
 
 try:
-    # แก้ไขชื่อรุ่นเป็น gemini-2.5-flash ตรงนี้ครับ
+    print("กำลังส่งข้อมูลให้ Gemini สรุป...")
+    # ใช้โมเดล gemini-3.5-flash ตามที่คุณต้องการ
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.5-flash',
         contents=prompt,
     )
     summary_text = response.text
+    # กรองสัญลักษณ์ที่อาจหลุดมาออก
     summary_text = summary_text.replace('*', '').replace('#', '')
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
@@ -168,6 +173,7 @@ final_message = f"☀️ อัปเดตตลาดล่าสุด\n({cur
 if len(final_message) > 4950:
     final_message = final_message[:4950] + "\n...(ข้อความยาวเกินไป)"
 
+print("กำลังส่งข้อความเข้า LINE...")
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
@@ -179,9 +185,11 @@ data = {
 }
 
 response_line = requests.post(url, headers=headers, json=data)
+
 if response_line.status_code == 200:
     print("✅ ส่งข้อความเข้า LINE สำเร็จ!")
 else:
     print(f"❌ ส่ง LINE ไม่สำเร็จ! Error Code: {response_line.status_code}")
     print(f"สาเหตุจาก LINE API: {response_line.text}")
+    # บังคับให้ระบบแจ้งเตือนว่าทำงานผิดพลาดเพื่อเตือนเข้า LINE อีกช่องทาง
     sys.exit(1)
