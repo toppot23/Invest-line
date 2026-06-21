@@ -1,164 +1,45 @@
-import os
-import requests
-import feedparser
-import yfinance as yf
-from datetime import datetime
-import xml.etree.ElementTree as ET
-from google import genai
-import pytz
-from gtts import gTTS
-from mutagen.mp3 import MP3
+name: Daily Investment News
 
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-LINE_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_USER_ID = os.environ.get('LINE_USER_ID')
+on:
+  schedule:
+    - cron: '0 2,13 * * *'
+  workflow_dispatch:
 
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-tz_thai = pytz.timezone('Asia/Bangkok')
-now_thai = datetime.now(tz_thai)
-current_time_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
-
-# 1. ฟังก์ชันดึงราคาตลาดโลก
-def fetch_ticker_price(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="5d")
-        if not hist.empty:
-            return hist['Close'].iloc[-1]
-        return None
-    except Exception:
-        return None
-
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย
-def fetch_thai_oil_prices():
-    gasohol95, diesel, update_date = None, None, ""
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    try:
-        res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            prices = data.get('response', {}).get('stations', {}).get('ptt', {})
-            update_date = data.get('response', {}).get('date', '')
-            if 'gasohol_95' in prices: gasohol95 = str(prices['gasohol_95'].get('price', ''))
-            if 'diesel' in prices: diesel = str(prices['diesel'].get('price', ''))
-            if gasohol95 and diesel: return gasohol95, diesel, update_date
-    except Exception: pass
-    return gasohol95, diesel, update_date
-
-print("กำลังดึงข้อมูลราคาล่าสุด...")
-gold_price = fetch_ticker_price("GC=F")   
-oil_wti = fetch_ticker_price("CL=F")    
-btc_price = fetch_ticker_price("BTC-USD")  
-th_gas95, th_diesel, th_oil_date = fetch_thai_oil_prices()
-
-price_context = "ราคาตลาดล่าสุด\n"
-price_context += f"• ทองคำโลก: ${gold_price:.2f} / ออนซ์\n" if gold_price else ""
-price_context += f"• น้ำมันดิบโลก (WTI): ${oil_wti:.2f} / บาร์เรล\n" if oil_wti else ""
-price_context += f"• Bitcoin: ${btc_price:,.2f}\n" if btc_price else ""
-if th_gas95 or th_diesel:
-    price_context += f"\n[ราคาน้ำมันขายปลีกไทย อัปเดตวันที่: {th_oil_date}]\n"
-    if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
-    if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
-
-# 3. ดึงข้อมูลข่าวสาร
-rss_feeds = {
-    "US_Macro": "https://finance.yahoo.com/news/rssindex",
-    "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
-    "Crypto": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "Thai": "https://www.prachachat.net/finance/feed",
-    "Gold": "https://www.kitco.com/rss/source/kitco-news-all.xml"
-}
-news_data = ""
-for category, url in rss_feeds.items():
-    try:
-        feed = feedparser.parse(url)
-        for entry in feed.entries[:15]:
-            news_data += f"- {entry.title}\n"
-    except Exception: pass
-
-# 4. ส่งคำสั่งให้ Gemini สรุป
-prompt = f"""
-สรุปข่าวการลงทุนจากข้อมูลที่ให้มา โดยจัดรูปแบบให้ดูคลีน เป็นระเบียบ มีการเว้นบรรทัดระหว่างย่อหน้าและหัวข้อให้ชัดเจน
-ห้ามใช้เครื่องหมายดอกจัน และแฮชแท็ก ในข้อความโดยเด็ดขาด 
-ให้ใช้ Emoji ที่เกี่ยวข้องกับเนื้อหาข่าวมานำหน้าแต่ละบรรทัดย่อยแทนการใช้จุดหรือขีด 
-
-แบ่งเป็น 6 หมวดหมู่ดังนี้:
-1. 🇺🇸 หุ้นสหรัฐ (ภาพรวม, Sector เด่น, หุ้นที่น่าสนใจ)
-2. 🇨🇳 หุ้นจีนและฮ่องกง (ภาพรวมตลาด, กลุ่มอุตสาหกรรม, หุ้นเด่น)
-3. 🇹🇭 หุ้นไทย (ประเด็นหลักที่กระทบตลาดล่าสุด)
-4. 🥇 ทองคำ และ 🛢️ น้ำมัน (บรรทัดแรกให้นำข้อมูล ราคาตลาดล่าสุด และ ราคาน้ำมันขายปลีกไทย ที่แนบให้ไปใส่ให้ครบถ้วน จากนั้นสรุปข่าวที่เกี่ยวข้อง)
-5. ₿ คริปโตเคอร์เรนซี (บรรทัดแรกให้สรุปราคา BTC ล่าสุด และสรุปข่าวสารสำคัญ)
-6. 🌍 เศรษฐกิจมหภาค (ดอกเบี้ย ค่าเงิน นโยบายการเงินทั่วโลก)
-
-กฎสำคัญ:
-• ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
-• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน
-• สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
-
-ข้อมูลอ้างอิงราคา:
-{price_context}
-ข้อมูลข่าว:
-{news_data}
-"""
-
-try:
-    response = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
-    summary_text = response.text.replace('*', '').replace('#', '')
-except Exception as e:
-    summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
-
-# 5. กระบวนการสร้างไฟล์เสียง (Text-to-Speech)
-audio_url = None
-duration_ms = 0
-try:
-    print("กำลังแปลงข้อความเป็นไฟล์เสียง...")
-    # แปลงเฉพาะเนื้อข่าวภาษาไทย ตัดพวกสัญลักษณ์หน้าหัวข้อออกเพื่อความชัดเจนตอนอ่าน
-    clean_text_for_speech = f"อัปเดตตลาดล่าสุด วันที่ {current_time_str} " + summary_text
+jobs:
+  run-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     
-    tts = gTTS(text=clean_text_for_speech, lang='th', slow=False)
-    tts.save("summary.mp3")
-    
-    # หาความยาวของไฟล์เสียง (มิลลิวินาที) ตามเงื่อนไขของ LINE API
-    audio_file = MP3("summary.mp3")
-    duration_ms = int(audio_file.info.length * 1000)
-    
-    # อัปโหลดไฟล์เสียงไปฝากไว้ที่บริการฝากไฟล์ชั่วคราวฟรี (transfer.sh) เพื่อเอาลิงก์ URL 
-    print("กำลังอัปโหลดไฟล์เสียง...")
-    with open("summary.mp3", "rb") as f:
-        upload_res = requests.put("https://transfer.sh/summary.mp3", data=f, timeout=15)
-        if upload_res.status_code == 200:
-            audio_url = upload_res.text.strip()
-            print(f"ลิงก์ไฟล์เสียง: {audio_url}")
-except Exception as e:
-    print(f"เกิดข้อผิดพลาดในการทำไฟล์เสียง: {e}")
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-# 6. ส่งข้อมูลเข้า LINE (ส่งแบบ Array ทั้งข้อความ และ คลิปเสียง)
-url = 'https://api.line.me/v2/bot/message/push'
-headers = {
-    'Content-Type': 'application/json',
-    'Authorization': f'Bearer {LINE_TOKEN}'
-}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-messages_payload = [
-    {'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}
-]
+      - name: Install dependencies
+        # เพิ่ม gtts และ mutagen เข้าไปตรงนี้ครับ
+        run: pip install requests feedparser google-genai yfinance gTTS mutagen pytz
 
-# ถ้าสร้างไฟล์เสียงและอัปโหลดสำเร็จ ให้พ่วงข้อความเสียงเข้าไปในแชทด้วย
-if audio_url:
-    messages_payload.append({
-        'type': 'audio',
-        'originalContentUrl': audio_url,
-        'duration': duration_ms
-    })
+      - name: Run script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python main.py
 
-data = {
-    'to': LINE_USER_ID,
-    'messages': messages_payload
-}
-
-response_line = requests.post(url, headers=headers, json=data)
-if response_line.status_code == 200:
-    print("✅ ส่งข้อความและคลิปเสียงเข้า LINE สำเร็จ!")
-else:
-    print(f"❌ ส่ง LINE ไม่สำเร็จ! Error: {response_line.text}")
+      - name: Send Alert on Failure
+        if: failure()
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: |
+          curl -X POST https://api.line.me/v2/bot/message/push \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
+          -d '{
+            "to": "'"$LINE_USER_ID"'",
+            "messages": [{"type": "text", "text": "⚠️ แจ้งเตือน: ระบบสรุปข่าวเช้านี้ขัดข้อง กรุณาตรวจสอบใน GitHub Actions"}]
+          }'
