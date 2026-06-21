@@ -8,6 +8,8 @@ on:
 jobs:
   run-news:
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # กำหนดเวลาสูงสุด ป้องกันระบบค้างเกิน 10 นาที
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -26,3 +28,18 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: python main.py
+
+      # --- เพิ่มขั้นตอนส่งแจ้งเตือนเมื่อระบบล้มเหลว ---
+      - name: Send Alert on Failure
+        if: failure() # จะทำงานก็ต่อเมื่อขั้นตอนด้านบนเกิด Error หรือ Timeout
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: |
+          curl -X POST https://api.line.me/v2/bot/message/push \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
+          -d '{
+            "to": "'"$LINE_USER_ID"'",
+            "messages": [{"type": "text", "text": "⚠️ แจ้งเตือนด่วน: ระบบสรุปข่าวเช้านี้ขัดข้อง (อาจเกิดจาก API Limit, ดึงข้อมูลไม่ได้ หรือ Timeout) กรุณาตรวจสอบ Log ในหน้า GitHub Actions ครับ"}]
+          }'
