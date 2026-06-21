@@ -2,7 +2,7 @@ name: Daily Investment News
 
 on:
   schedule:
-    - cron: '0 2,13 * * *' # เวลา 02:00 UTC = 09:00 น. เวลาไทย
+    - cron: '0 1,13 * * *' # เวลา 02:00 UTC = 09:00 น. เวลาไทย
   workflow_dispatch: # อนุญาตให้กดรันเองแบบแมนนวลได้
 
 jobs:
