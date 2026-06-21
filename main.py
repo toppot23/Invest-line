@@ -6,6 +6,7 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 from google import genai
 import pytz
+import sys
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 LINE_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -29,7 +30,7 @@ def fetch_ticker_price(symbol):
     except Exception:
         return None
 
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย
+# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย (มีแผนสำรอง)
 def fetch_thai_oil_prices():
     gasohol95 = None
     diesel = None
@@ -103,7 +104,7 @@ if th_gas95 or th_diesel:
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสาร
+# 3. ดึงข้อมูลข่าวสาร (ดึงย้อนหลังเยอะขึ้นเพื่อกันข่าวว่าง)
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -175,3 +176,4 @@ if response_line.status_code == 200:
 else:
     print(f"❌ ส่ง LINE ไม่สำเร็จ! Error Code: {response_line.status_code}")
     print(f"สาเหตุจาก LINE API: {response_line.text}")
+    sys.exit(1) # บังคับให้ระบบแจ้งเตือนว่าทำงานผิดพลาด
