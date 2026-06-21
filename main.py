@@ -119,7 +119,6 @@ news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        # ปรับเพิ่มการดึงเป็น 15 ข่าวล่าสุด เพื่อเก็บข่าวสำคัญของวันก่อนๆ เผื่อกรณีข่าววันปัจจุบันว่าง
         for entry in feed.entries[:15]:
             news_data += f"- {entry.title}\n"
     except Exception:
@@ -162,7 +161,7 @@ try:
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาด: {e}"
 
-# 5. ส่งข้อมูลเข้า LINE โดยปรับหัวข้อตามที่คุณต้องการ
+# 5. ส่งข้อมูลเข้า LINE
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
@@ -170,7 +169,8 @@ headers = {
 }
 data = {
     'to': LINE_USER_ID,
-    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด ({current_time_str})\n\n{summary_text}"}]
+    # ปรับตรงนี้: ใส่ \n เพื่อบังคับให้วงเล็บวันที่ตกลงมาอยู่บรรทัดใหม่
+    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}]
 }
 
 requests.post(url, headers=headers, json=data)
