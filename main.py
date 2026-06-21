@@ -2,14 +2,21 @@ import os
 import requests
 import feedparser
 import yfinance as yf
+from datetime import datetime
 import xml.etree.ElementTree as ET
 from google import genai
+import pytz
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 LINE_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_USER_ID = os.environ.get('LINE_USER_ID')
 
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# ตั้งค่าโซนเวลาประเทศไทยสำหรับใส่ในหัวข้อข้อความ
+tz_thai = pytz.timezone('Asia/Bangkok')
+now_thai = datetime.now(tz_thai)
+current_time_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
 
 # 1. ฟังก์ชันดึงราคาตลาดโลก
 def fetch_ticker_price(symbol):
@@ -47,8 +54,8 @@ def fetch_thai_oil_prices():
                 
             if gasohol95 and diesel:
                 return gasohol95, diesel, update_date
-    except Exception as e:
-        print(f"JSON API Error: {e}")
+    except Exception:
+        pass
 
     # แผน B: ดึงจากระบบ ปตท. (XML)
     try:
@@ -77,8 +84,8 @@ def fetch_thai_oil_prices():
                         
             if gasohol95 or diesel:
                 return gasohol95, diesel, update_date
-    except Exception as e:
-        print(f"PTT API Error: {e}")
+    except Exception:
+        pass
 
     return gasohol95, diesel, update_date
 
@@ -99,7 +106,7 @@ if th_gas95 or th_diesel:
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสาร
+# 3. ดึงข้อมูลข่าวสารจากคลังข่าวหลัก
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -112,12 +119,13 @@ news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:6]:
+        # ปรับเพิ่มการดึงเป็น 15 ข่าวล่าสุด เพื่อเก็บข่าวสำคัญของวันก่อนๆ เผื่อกรณีข่าววันปัจจุบันว่าง
+        for entry in feed.entries[:15]:
             news_data += f"- {entry.title}\n"
     except Exception:
         pass
 
-# 4. ส่งคำสั่งให้ Gemini สรุป (เพิ่มกฎเรื่องการทับศัพท์)
+# 4. ส่งคำสั่งให้ Gemini สรุป
 prompt = f"""
 สรุปข่าวการลงทุนจากข้อมูลที่ให้มา โดยจัดรูปแบบให้ดูคลีน เป็นระเบียบ มีการเว้นบรรทัดระหว่างย่อหน้าและหัวข้อให้ชัดเจน
 ห้ามใช้เครื่องหมายดอกจัน และแฮชแท็ก ในข้อความโดยเด็ดขาด 
@@ -127,20 +135,20 @@ prompt = f"""
 แบ่งเป็น 6 หมวดหมู่ดังนี้:
 1. 🇺🇸 หุ้นสหรัฐ (ภาพรวม, Sector เด่น, หุ้นที่น่าสนใจ)
 2. 🇨🇳 หุ้นจีนและฮ่องกง (ภาพรวมตลาด, กลุ่มอุตสาหกรรม, หุ้นเด่น)
-3. 🇹🇭 หุ้นไทย (ประเด็นหลักที่กระทบตลาดวันนี้)
+3. 🇹🇭 หุ้นไทย (ประเด็นหลักที่กระทบตลาดล่าสุด)
 4. 🥇 ทองคำ และ 🛢️ น้ำมัน (บรรทัดแรกให้นำข้อมูล ราคาตลาดล่าสุด และ ราคาน้ำมันขายปลีกไทย ที่แนบให้ไปใส่ให้ครบถ้วน จากนั้นสรุปข่าวที่เกี่ยวข้อง)
 5. ₿ คริปโตเคอร์เรนซี (บรรทัดแรกให้สรุปราคา BTC ล่าสุด และสรุปข่าวสารสำคัญ)
 6. 🌍 เศรษฐกิจมหภาค (ดอกเบี้ย ค่าเงิน นโยบายการเงินทั่วโลก)
 
 กฎสำคัญ:
 • ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
-• หากหัวข้อไหนไม่มีข่าว ให้เขียนบรรทัดเดียวสั้นๆ ว่า "ไม่มีประเด็นสำคัญ"
+• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน เพื่อป้องกันไม่ให้ข้อมูลในหมวดหมู่ต่างๆ ว่างเปล่า
 • สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
 ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
 {price_context}
 
-ข้อมูลข่าวสำหรับวันนี้:
+ข้อมูลข่าวสำหรับวันนี้และวันก่อนหน้า:
 {news_data}
 """
 
@@ -150,12 +158,11 @@ try:
         contents=prompt,
     )
     summary_text = response.text
-    # บังคับล้างเครื่องหมายขยะ
     summary_text = summary_text.replace('*', '').replace('#', '')
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาด: {e}"
 
-# 5. ส่งข้อมูลเข้า LINE
+# 5. ส่งข้อมูลเข้า LINE โดยปรับหัวข้อตามที่คุณต้องการ
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
@@ -163,7 +170,7 @@ headers = {
 }
 data = {
     'to': LINE_USER_ID,
-    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดเช้านี้\n\n{summary_text}"}]
+    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด ({current_time_str})\n\n{summary_text}"}]
 }
 
 requests.post(url, headers=headers, json=data)
