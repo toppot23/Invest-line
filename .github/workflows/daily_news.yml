@@ -2,13 +2,14 @@ name: Daily Investment News
 
 on:
   schedule:
-    - cron: '0 1,13 * * *' # เวลา 02:00 UTC = 09:00 น. เวลาไทย
-  workflow_dispatch: # อนุญาตให้กดรันเองแบบแมนนวลได้
+    # 0 1 = 8 โมงเช้าไทย | 0 13 = 2 ทุ่มไทย
+    - cron: '0 1,13 * * *'
+  workflow_dispatch:
 
 jobs:
   run-news:
     runs-on: ubuntu-latest
-    timeout-minutes: 10 # ป้องกันระบบค้างเกิน 10 นาที
+    timeout-minutes: 10
     
     steps:
       - name: Checkout Repository
@@ -20,7 +21,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests feedparser google-genai yfinance
+        run: pip install requests feedparser google-genai yfinance pytz
 
       - name: Run script
         env:
@@ -29,7 +30,6 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: python main.py
 
-      # ส่งแจ้งเตือนเข้า LINE หากระบบทำงานล้มเหลว
       - name: Send Alert on Failure
         if: failure()
         env:
@@ -41,5 +41,5 @@ jobs:
           -H "Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN" \
           -d '{
             "to": "'"$LINE_USER_ID"'",
-            "messages": [{"type": "text", "text": "⚠️ แจ้งเตือน: ระบบสรุปข่าวเช้านี้ขัดข้อง กรุณาตรวจสอบใน GitHub Actions"}]
+            "messages": [{"type": "text", "text": "⚠️ แจ้งเตือน: ระบบสรุปข่าวขัดข้อง กรุณาตรวจสอบใน GitHub Actions"}]
           }'
