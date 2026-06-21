@@ -30,7 +30,7 @@ def fetch_ticker_price(symbol):
     except Exception:
         return None
 
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย (มีแผนสำรอง)
+# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย
 def fetch_thai_oil_prices():
     gasohol95 = None
     diesel = None
@@ -104,7 +104,7 @@ if th_gas95 or th_diesel:
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสาร (ดึงย้อนหลังเยอะขึ้นเพื่อกันข่าวว่าง)
+# 3. ดึงข้อมูลข่าวสาร
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -117,7 +117,7 @@ news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:15]:
+        for entry in feed.entries[:10]: # ปรับลดลงมานิดนึงเพื่อไม่ให้รกเกินไป
             news_data += f"- {entry.title}\n"
     except Exception:
         pass
@@ -139,10 +139,11 @@ prompt = f"""
 
 กฎสำคัญ:
 • ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
-• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน
-• สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
+• ในกรณีที่ข้อมูลข่าวสารมีน้อย ให้ดึงข่าวสำคัญของวันก่อนหน้ามาสรุปแทน
+• สรุปเนื้อหาให้สั้นและกระชับที่สุด (หมวดละไม่เกิน 3-4 บรรทัด) เพื่อไม่ให้ข้อความยาวเกิน 5000 ตัวอักษร 
+• สรุปเข้าเรื่องทันที ไม่ต้องมีคำเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
-ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
+ข้อมูลอ้างอิงราคา:
 {price_context}
 
 ข้อมูลข่าวสำหรับวันนี้และวันก่อนหน้า:
@@ -159,7 +160,13 @@ try:
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
 
-# 5. ส่งข้อมูลเข้า LINE
+# 5. ประกอบข้อความและตรวจสอบความยาวก่อนส่งเข้า LINE
+final_message = f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"
+
+# ถ้าข้อความยาวเกินลิมิตของ LINE (5000 ตัวอักษร) ให้ทำการตัดส่วนที่เกินออก
+if len(final_message) > 4950:
+    final_message = final_message[:4950] + "\n...(ข้อความยาวเกินไป)"
+
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
@@ -167,7 +174,7 @@ headers = {
 }
 data = {
     'to': LINE_USER_ID,
-    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}]
+    'messages': [{'type': 'text', 'text': final_message}]
 }
 
 response_line = requests.post(url, headers=headers, json=data)
@@ -176,4 +183,4 @@ if response_line.status_code == 200:
 else:
     print(f"❌ ส่ง LINE ไม่สำเร็จ! Error Code: {response_line.status_code}")
     print(f"สาเหตุจาก LINE API: {response_line.text}")
-    sys.exit(1) # บังคับให้ระบบแจ้งเตือนว่าทำงานผิดพลาด
+    sys.exit(1)
