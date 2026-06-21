@@ -151,9 +151,9 @@ prompt = f"""
 """
 
 try:
-    # แก้ไขชื่อรุ่นเป็น gemini-1.5-flash ตรงนี้ครับ
+    # แก้ไขชื่อรุ่นเป็น gemini-2.5-flash ตรงนี้ครับ
     response = client.models.generate_content(
-        model='gemini-1.5-flash',
+        model='gemini-2.5-flash',
         contents=prompt,
     )
     summary_text = response.text
