@@ -117,7 +117,7 @@ news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:10]: # ปรับลดลงมานิดนึงเพื่อไม่ให้รกเกินไป
+        for entry in feed.entries[:10]: 
             news_data += f"- {entry.title}\n"
     except Exception:
         pass
@@ -151,8 +151,9 @@ prompt = f"""
 """
 
 try:
+    # แก้ไขชื่อรุ่นเป็น gemini-1.5-flash ตรงนี้ครับ
     response = client.models.generate_content(
-        model='gemini-3.5-flash',
+        model='gemini-1.5-flash',
         contents=prompt,
     )
     summary_text = response.text
@@ -163,7 +164,7 @@ except Exception as e:
 # 5. ประกอบข้อความและตรวจสอบความยาวก่อนส่งเข้า LINE
 final_message = f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"
 
-# ถ้าข้อความยาวเกินลิมิตของ LINE (5000 ตัวอักษร) ให้ทำการตัดส่วนที่เกินออก
+# ดักความยาวข้อความไม่ให้เกินลิมิต 5000 ตัวอักษรของ LINE API
 if len(final_message) > 4950:
     final_message = final_message[:4950] + "\n...(ข้อความยาวเกินไป)"
 
