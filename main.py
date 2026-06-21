@@ -13,7 +13,7 @@ LINE_USER_ID = os.environ.get('LINE_USER_ID')
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ตั้งค่าโซนเวลาประเทศไทยสำหรับใส่ในหัวข้อข้อความ
+# ตั้งเวลาไทย
 tz_thai = pytz.timezone('Asia/Bangkok')
 now_thai = datetime.now(tz_thai)
 current_time_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
@@ -39,7 +39,6 @@ def fetch_thai_oil_prices():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    # แผน A: ดึงจาก API JSON
     try:
         res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
         if res.status_code == 200:
@@ -57,7 +56,6 @@ def fetch_thai_oil_prices():
     except Exception:
         pass
 
-    # แผน B: ดึงจากระบบ ปตท. (XML)
     try:
         url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=en"
         response = requests.get(url, headers=headers, timeout=10)
@@ -95,7 +93,6 @@ oil_wti = fetch_ticker_price("CL=F")
 btc_price = fetch_ticker_price("BTC-USD")  
 th_gas95, th_diesel, th_oil_date = fetch_thai_oil_prices()
 
-# ประกอบข้อมูลราคาจัดหน้าแบบคลีนๆ
 price_context = "ราคาตลาดล่าสุด\n"
 price_context += f"• ทองคำโลก: ${gold_price:.2f} / ออนซ์\n" if gold_price else ""
 price_context += f"• น้ำมันดิบโลก (WTI): ${oil_wti:.2f} / บาร์เรล\n" if oil_wti else ""
@@ -106,7 +103,7 @@ if th_gas95 or th_diesel:
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสารจากคลังข่าวหลัก
+# 3. ดึงข้อมูลข่าวสาร
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -141,7 +138,7 @@ prompt = f"""
 
 กฎสำคัญ:
 • ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
-• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน เพื่อป้องกันไม่ให้ข้อมูลในหมวดหมู่ต่างๆ ว่างเปล่า
+• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน
 • สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
 ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
@@ -159,7 +156,7 @@ try:
     summary_text = response.text
     summary_text = summary_text.replace('*', '').replace('#', '')
 except Exception as e:
-    summary_text = f"เกิดข้อผิดพลาด: {e}"
+    summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
 
 # 5. ส่งข้อมูลเข้า LINE
 url = 'https://api.line.me/v2/bot/message/push'
@@ -169,8 +166,12 @@ headers = {
 }
 data = {
     'to': LINE_USER_ID,
-    # ปรับตรงนี้: ใส่ \n เพื่อบังคับให้วงเล็บวันที่ตกลงมาอยู่บรรทัดใหม่
     'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}]
 }
 
-requests.post(url, headers=headers, json=data)
+response_line = requests.post(url, headers=headers, json=data)
+if response_line.status_code == 200:
+    print("✅ ส่งข้อความเข้า LINE สำเร็จ!")
+else:
+    print(f"❌ ส่ง LINE ไม่สำเร็จ! Error Code: {response_line.status_code}")
+    print(f"สาเหตุจาก LINE API: {response_line.text}")
