@@ -2,6 +2,7 @@ import os
 import requests
 import feedparser
 import yfinance as yf
+import xml.etree.ElementTree as ET
 from google import genai
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -21,31 +22,45 @@ def fetch_ticker_price(symbol):
     except Exception:
         return None
 
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในประเทศไทย
+# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในประเทศไทย (ใช้ API กลางของ ปตท. OR)
 def fetch_thai_oil_prices():
     try:
-        feed_url = "https://www.bangchak.co.id/th/oilprice-rss"
-        feed = feedparser.parse(feed_url)
+        url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=thai"
+        response = requests.get(url, timeout=10)
+        
+        root = ET.fromstring(response.content)
+        inner_xml = root.text
+        inner_root = ET.fromstring(inner_xml)
         
         gasohol95 = None
         diesel = None
         update_date = ""
         
-        if feed.entries:
-            update_date = feed.entries[0].get('updated', '').split('T')[0]
-            if not update_date:
-                update_date = feed.entries[0].get('published', '')
+        for item in inner_root.findall('DataAccess'):
+            product_elem = item.find('PRODUCT')
+            price_elem = item.find('PRICE')
+            date_elem = item.find('PRICE_DATE')
+            
+            if product_elem is None or price_elem is None or not price_elem.text:
+                continue
                 
-            for entry in feed.entries:
-                title = entry.title.lower()
-                if "gasohol 95" in title or "แก๊สโซฮอล์ 95" in title:
-                    gasohol95 = entry.summary
-                elif "diesel" in title or "ดีเซล" in title:
-                    if "premium" not in title and "พรีเมียม" not in title:
-                        diesel = entry.summary
-                        
+            product = product_elem.text.lower() if product_elem.text else ""
+            price = price_elem.text
+            
+            # เก็บวันที่อัปเดต (ตัดเวลาออก เอาแต่วันที่)
+            if not update_date and date_elem is not None and date_elem.text:
+                update_date = date_elem.text.split(' ')[0]
+                
+            if "gasohol 95" in product or "แก๊สโซฮอล์ 95" in product:
+                gasohol95 = price
+            elif "diesel" in product or "ดีเซล" in product:
+                # คัดกรองตัวที่เป็นดีเซลธรรมดา ไม่เอาตัวพรีเมียม
+                if "premium" not in product and "พรีเมียม" not in product and "super" not in product:
+                    diesel = price
+                    
         return gasohol95, diesel, update_date
-    except Exception:
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงราคาน้ำมัน ปตท.: {e}")
         return None, None, ""
 
 print("กำลังดึงข้อมูลราคาล่าสุด...")
@@ -60,7 +75,7 @@ price_context += f"• น้ำมันดิบโลก (WTI): ${oil_wti:.2f
 price_context += f"• Bitcoin: ${btc_price:,.2f}\n" if btc_price else ""
 
 if th_gas95 or th_diesel:
-    price_context += f"\n[ราคาน้ำมันขายปลีกในไทย (บาท/ลิตร) อัปเดตวันที่: {th_oil_date}]\n"
+    price_context += f"\n[ราคาน้ำมันขายปลีก ปตท. (บาท/ลิตร) อัปเดตวันที่: {th_oil_date}]\n"
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท\n"
 
@@ -109,7 +124,6 @@ prompt = f"""
 """
 
 try:
-    # เปลี่ยนมาใช้รุ่น 3.5 Flash ตามที่ต้องการครับ
     response = client.models.generate_content(
         model='gemini-3.5-flash',
         contents=prompt,
