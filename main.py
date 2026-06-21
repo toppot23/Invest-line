@@ -6,6 +6,8 @@ from datetime import datetime
 import xml.etree.ElementTree as ET
 from google import genai
 import pytz
+from gtts import gTTS
+from mutagen.mp3 import MP3
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 LINE_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -13,7 +15,6 @@ LINE_USER_ID = os.environ.get('LINE_USER_ID')
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ตั้งค่าโซนเวลาประเทศไทยสำหรับใส่ในหัวข้อข้อความ
 tz_thai = pytz.timezone('Asia/Bangkok')
 now_thai = datetime.now(tz_thai)
 current_time_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
@@ -31,62 +32,18 @@ def fetch_ticker_price(symbol):
 
 # 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย
 def fetch_thai_oil_prices():
-    gasohol95 = None
-    diesel = None
-    update_date = ""
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-
-    # แผน A: ดึงจาก API JSON
+    gasohol95, diesel, update_date = None, None, ""
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
         res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
         if res.status_code == 200:
             data = res.json()
             prices = data.get('response', {}).get('stations', {}).get('ptt', {})
             update_date = data.get('response', {}).get('date', '')
-            
-            if 'gasohol_95' in prices:
-                gasohol95 = str(prices['gasohol_95'].get('price', ''))
-            if 'diesel' in prices:
-                diesel = str(prices['diesel'].get('price', ''))
-                
-            if gasohol95 and diesel:
-                return gasohol95, diesel, update_date
-    except Exception:
-        pass
-
-    # แผน B: ดึงจากระบบ ปตท. (XML)
-    try:
-        url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=en"
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            root = ET.fromstring(response.content)
-            inner_root = ET.fromstring(root.text)
-            
-            for item in inner_root.findall('DataAccess'):
-                prod = item.find('PRODUCT')
-                price = item.find('PRICE')
-                date_val = item.find('PRICE_DATE')
-                
-                if prod is not None and price is not None and price.text:
-                    p_name = prod.text.lower()
-                    
-                    if not update_date and date_val is not None:
-                        update_date = date_val.text.split(' ')[0]
-                        
-                    if "gasohol 95" in p_name and "premium" not in p_name and "super" not in p_name:
-                        gasohol95 = price.text
-                    elif "diesel" in p_name and "premium" not in p_name and "super" not in p_name:
-                        diesel = price.text
-                        
-            if gasohol95 or diesel:
-                return gasohol95, diesel, update_date
-    except Exception:
-        pass
-
+            if 'gasohol_95' in prices: gasohol95 = str(prices['gasohol_95'].get('price', ''))
+            if 'diesel' in prices: diesel = str(prices['diesel'].get('price', ''))
+            if gasohol95 and diesel: return gasohol95, diesel, update_date
+    except Exception: pass
     return gasohol95, diesel, update_date
 
 print("กำลังดึงข้อมูลราคาล่าสุด...")
@@ -95,18 +52,16 @@ oil_wti = fetch_ticker_price("CL=F")
 btc_price = fetch_ticker_price("BTC-USD")  
 th_gas95, th_diesel, th_oil_date = fetch_thai_oil_prices()
 
-# ประกอบข้อมูลราคาจัดหน้าแบบคลีนๆ
 price_context = "ราคาตลาดล่าสุด\n"
 price_context += f"• ทองคำโลก: ${gold_price:.2f} / ออนซ์\n" if gold_price else ""
 price_context += f"• น้ำมันดิบโลก (WTI): ${oil_wti:.2f} / บาร์เรล\n" if oil_wti else ""
 price_context += f"• Bitcoin: ${btc_price:,.2f}\n" if btc_price else ""
-
 if th_gas95 or th_diesel:
     price_context += f"\n[ราคาน้ำมันขายปลีกไทย อัปเดตวันที่: {th_oil_date}]\n"
     if th_gas95: price_context += f"• แก๊สโซฮอล์ 95: {th_gas95} บาท/ลิตร\n"
     if th_diesel: price_context += f"• ดีเซล: {th_diesel} บาท/ลิตร\n"
 
-# 3. ดึงข้อมูลข่าวสารจากคลังข่าวหลัก
+# 3. ดึงข้อมูลข่าวสาร
 rss_feeds = {
     "US_Macro": "https://finance.yahoo.com/news/rssindex",
     "Asia_China": "https://www.cnbc.com/id/19832390/device/rss/rss.html",
@@ -114,22 +69,18 @@ rss_feeds = {
     "Thai": "https://www.prachachat.net/finance/feed",
     "Gold": "https://www.kitco.com/rss/source/kitco-news-all.xml"
 }
-
 news_data = ""
 for category, url in rss_feeds.items():
     try:
         feed = feedparser.parse(url)
-        # ปรับเพิ่มการดึงเป็น 15 ข่าวล่าสุด เพื่อเก็บข่าวสำคัญของวันก่อนๆ เผื่อกรณีข่าววันปัจจุบันว่าง
         for entry in feed.entries[:15]:
             news_data += f"- {entry.title}\n"
-    except Exception:
-        pass
+    except Exception: pass
 
 # 4. ส่งคำสั่งให้ Gemini สรุป
 prompt = f"""
 สรุปข่าวการลงทุนจากข้อมูลที่ให้มา โดยจัดรูปแบบให้ดูคลีน เป็นระเบียบ มีการเว้นบรรทัดระหว่างย่อหน้าและหัวข้อให้ชัดเจน
 ห้ามใช้เครื่องหมายดอกจัน และแฮชแท็ก ในข้อความโดยเด็ดขาด 
-
 ให้ใช้ Emoji ที่เกี่ยวข้องกับเนื้อหาข่าวมานำหน้าแต่ละบรรทัดย่อยแทนการใช้จุดหรือขีด 
 
 แบ่งเป็น 6 หมวดหมู่ดังนี้:
@@ -142,35 +93,72 @@ prompt = f"""
 
 กฎสำคัญ:
 • ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
-• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน เพื่อป้องกันไม่ให้ข้อมูลในหมวดหมู่ต่างๆ ว่างเปล่า
+• ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน
 • สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
-ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
+ข้อมูลอ้างอิงราคา:
 {price_context}
-
-ข้อมูลข่าวสำหรับวันนี้และวันก่อนหน้า:
+ข้อมูลข่าว:
 {news_data}
 """
 
 try:
-    response = client.models.generate_content(
-        model='gemini-3.5-flash',
-        contents=prompt,
-    )
-    summary_text = response.text
-    summary_text = summary_text.replace('*', '').replace('#', '')
+    response = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
+    summary_text = response.text.replace('*', '').replace('#', '')
 except Exception as e:
-    summary_text = f"เกิดข้อผิดพลาด: {e}"
+    summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
 
-# 5. ส่งข้อมูลเข้า LINE โดยปรับหัวข้อตามที่คุณต้องการ
+# 5. กระบวนการสร้างไฟล์เสียง (Text-to-Speech)
+audio_url = None
+duration_ms = 0
+try:
+    print("กำลังแปลงข้อความเป็นไฟล์เสียง...")
+    # แปลงเฉพาะเนื้อข่าวภาษาไทย ตัดพวกสัญลักษณ์หน้าหัวข้อออกเพื่อความชัดเจนตอนอ่าน
+    clean_text_for_speech = f"อัปเดตตลาดล่าสุด วันที่ {current_time_str} " + summary_text
+    
+    tts = gTTS(text=clean_text_for_speech, lang='th', slow=False)
+    tts.save("summary.mp3")
+    
+    # หาความยาวของไฟล์เสียง (มิลลิวินาที) ตามเงื่อนไขของ LINE API
+    audio_file = MP3("summary.mp3")
+    duration_ms = int(audio_file.info.length * 1000)
+    
+    # อัปโหลดไฟล์เสียงไปฝากไว้ที่บริการฝากไฟล์ชั่วคราวฟรี (transfer.sh) เพื่อเอาลิงก์ URL 
+    print("กำลังอัปโหลดไฟล์เสียง...")
+    with open("summary.mp3", "rb") as f:
+        upload_res = requests.put("https://transfer.sh/summary.mp3", data=f, timeout=15)
+        if upload_res.status_code == 200:
+            audio_url = upload_res.text.strip()
+            print(f"ลิงก์ไฟล์เสียง: {audio_url}")
+except Exception as e:
+    print(f"เกิดข้อผิดพลาดในการทำไฟล์เสียง: {e}")
+
+# 6. ส่งข้อมูลเข้า LINE (ส่งแบบ Array ทั้งข้อความ และ คลิปเสียง)
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
     'Authorization': f'Bearer {LINE_TOKEN}'
 }
+
+messages_payload = [
+    {'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}
+]
+
+# ถ้าสร้างไฟล์เสียงและอัปโหลดสำเร็จ ให้พ่วงข้อความเสียงเข้าไปในแชทด้วย
+if audio_url:
+    messages_payload.append({
+        'type': 'audio',
+        'originalContentUrl': audio_url,
+        'duration': duration_ms
+    })
+
 data = {
     'to': LINE_USER_ID,
-    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด ({current_time_str})\n\n{summary_text}"}]
+    'messages': messages_payload
 }
 
-requests.post(url, headers=headers, json=data)
+response_line = requests.post(url, headers=headers, json=data)
+if response_line.status_code == 200:
+    print("✅ ส่งข้อความและคลิปเสียงเข้า LINE สำเร็จ!")
+else:
+    print(f"❌ ส่ง LINE ไม่สำเร็จ! Error: {response_line.text}")
