@@ -22,18 +22,17 @@ def fetch_ticker_price(symbol):
     except Exception:
         return None
 
-# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย (แก้ปัญหาการโดนบล็อก + ดึง 2 แหล่ง)
+# 2. ฟังก์ชันดึงราคาน้ำมันขายปลีกในไทย
 def fetch_thai_oil_prices():
     gasohol95 = None
     diesel = None
     update_date = ""
     
-    # พรางตัวเป็น Web Browser เพื่อไม่ให้เซิร์ฟเวอร์บล็อก GitHub Actions
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    # แผน A: ดึงจาก API ราคาน้ำมันไทย (JSON) ที่เสถียรและแม่นยำ
+    # แผน A: ดึงจาก API JSON
     try:
         res = requests.get("https://api.chnwt.dev/thai-oil-api/latest", headers=headers, timeout=10)
         if res.status_code == 200:
@@ -51,7 +50,7 @@ def fetch_thai_oil_prices():
     except Exception as e:
         print(f"JSON API Error: {e}")
 
-    # แผน B: ดึงจากระบบ ปตท. (XML) เผื่อแผน A ล่ม
+    # แผน B: ดึงจากระบบ ปตท. (XML)
     try:
         url = "https://orapiweb.pttor.com/oilservice/OilPrice.asmx/CurrentOilPrice?Language=en"
         response = requests.get(url, headers=headers, timeout=10)
@@ -118,7 +117,7 @@ for category, url in rss_feeds.items():
     except Exception:
         pass
 
-# 4. ส่งคำสั่งให้ Gemini สรุป
+# 4. ส่งคำสั่งให้ Gemini สรุป (เพิ่มกฎเรื่องการทับศัพท์)
 prompt = f"""
 สรุปข่าวการลงทุนจากข้อมูลที่ให้มา โดยจัดรูปแบบให้ดูคลีน เป็นระเบียบ มีการเว้นบรรทัดระหว่างย่อหน้าและหัวข้อให้ชัดเจน
 ห้ามใช้เครื่องหมายดอกจัน และแฮชแท็ก ในข้อความโดยเด็ดขาด 
@@ -134,6 +133,7 @@ prompt = f"""
 6. 🌍 เศรษฐกิจมหภาค (ดอกเบี้ย ค่าเงิน นโยบายการเงินทั่วโลก)
 
 กฎสำคัญ:
+• ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
 • หากหัวข้อไหนไม่มีข่าว ให้เขียนบรรทัดเดียวสั้นๆ ว่า "ไม่มีประเด็นสำคัญ"
 • สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
