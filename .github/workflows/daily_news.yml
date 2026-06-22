@@ -2,7 +2,6 @@ name: Daily Investment News
 
 on:
   schedule:
-    # ตั้งเวลาเป็น 8:15 น. (1:15 UTC) และ 20:15 น. (13:15 UTC) เพื่อหนีคิวขวดของ GitHub
     - cron: '15 1,13 * * *'
   workflow_dispatch:
 
