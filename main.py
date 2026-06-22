@@ -139,7 +139,7 @@ prompt = f"""
 กฎสำคัญ:
 • ใช้คำทับศัพท์ภาษาอังกฤษสำหรับชื่อบุคคล, บริษัท, หุ้น, กองทุน และศัพท์เฉพาะทางการเงิน/เทคนิคให้มากที่สุด (ไม่ต้องแปลไทย)
 • ในกรณีที่ข้อมูลข่าวสารในวันปัจจุบันมีน้อยหรือไม่มีเลย ให้ดึงข่าวสารสำคัญของวันก่อนหน้าที่มีระบุในข้อมูลอ้างอิงมาประมวลผลสรุปแทน
-• สรุปกระชับ ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
+• สรุปเนื้อหาให้กระชับ ได้ใจความสำคัญ จำกัดความยาวเพื่อไม่ให้ยืดเยื้อจนเกินไป ไม่ต้องเกริ่นนำ ไม่ต้องมีคำลงท้าย
 
 ข้อมูลอ้างอิงราคาสำหรับนำไปใส่ในหมวดหมู่:
 {price_context}
@@ -158,7 +158,17 @@ try:
 except Exception as e:
     summary_text = f"เกิดข้อผิดพลาดในการสรุปข่าว: {e}"
 
-# 5. ส่งข้อมูลเข้า LINE
+# 5. ส่งข้อมูลเข้า LINE (แก้ปัญหาข้อความยาวเกินลิมิต 5000 ตัวอักษร)
+full_message = f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"
+
+# ระบบหั่นข้อความ: ถ้าเกิน 4500 ตัวอักษร ให้ตัดขึ้นบอลลูนใหม่ (LINE ส่งได้สูงสุด 5 บอลลูนต่อครั้ง)
+messages_payload = []
+chunk_size = 4500
+for i in range(0, len(full_message), chunk_size):
+    messages_payload.append({'type': 'text', 'text': full_message[i:i+chunk_size]})
+    if len(messages_payload) == 5: 
+        break
+
 url = 'https://api.line.me/v2/bot/message/push'
 headers = {
     'Content-Type': 'application/json',
@@ -166,12 +176,11 @@ headers = {
 }
 data = {
     'to': LINE_USER_ID,
-    'messages': [{'type': 'text', 'text': f"☀️ อัปเดตตลาดล่าสุด\n({current_time_str})\n\n{summary_text}"}]
+    'messages': messages_payload
 }
 
 response_line = requests.post(url, headers=headers, json=data)
 
-# พิมพ์ผลลัพธ์ลง Log เพื่อเช็ก Error
 if response_line.status_code == 200:
     print("✅ ส่งข้อความเข้า LINE สำเร็จ!")
 else:
